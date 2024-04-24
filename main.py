@@ -6,8 +6,11 @@ def main():
     video_frames = read_video("input_videos/goal2.mp4")
     tracker = Tracker("models/best.pt")
     tracks = tracker.get_object_track(video_frames, read_from_stub=True, stub_path='stubs/stub_tracks.pkl')
-    print(tracks)
-    #save_video(video_frames, "output_videos/goalTest.avi")
+    #print(tracks)
+
+    output_video_frame  = tracker.draw_annotations(video_frames, tracks)
+    
+    save_video(output_video_frame, "output_videos/goaldraw.avi")
 
 
 if __name__ == "__main__":
