@@ -5,3 +5,6 @@ def get_center_of_bbox(bbox):
 
 def get_bbox_width(bbox):
     return bbox[2] - bbox[0]
+
+def get_bbox_height(bbox):
+    return bbox[3] - bbox[1]
