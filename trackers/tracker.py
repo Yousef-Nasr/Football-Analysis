@@ -29,7 +29,7 @@ class Tracker:
         batch_size = 20 # number of frames to process at once 
         detections = []
         for i in range(0, len(frames), batch_size):
-            batch_detections = self.model.predict(frames[i:i+batch_size], conf=0.1)
+            batch_detections = self.model.predict(frames[i:i+batch_size], conf=0.1, device='cuda:0' )
             detections += batch_detections
 
         return detections
@@ -117,7 +117,7 @@ class Tracker:
 
         # put text
         if track_id is not None:
-            cv2.putText(frame, str(track_id), (x_center - 10, y2 + 18), cv2.FONT_HERSHEY_SIMPLEX, (rect_width/100) , (0, 0, 0), 2)
+            cv2.putText(frame, str(track_id), (x_center - 10, y2 + 18), cv2.FONT_HERSHEY_SIMPLEX, (rect_width/100) , (0, 0, 0), 1)
         return frame
 
         
