@@ -9,7 +9,7 @@ class TeamAssigner:
     def get_clustring_model(self, image, n_clusters=2):
         image_2d = image.reshape(-1, 3)
 
-        kmeans = KMeans(n_clusters=n_clusters, init='k-means++', n_init=1)
+        kmeans = KMeans(n_clusters=n_clusters, init='k-means++', n_init=10)
         kmeans.fit(image_2d)
 
         return kmeans
@@ -97,13 +97,13 @@ class TeamAssigner:
             return team_id
         
         # predict the team every 7 frames
-        if frame_num % 7 == 0:
-            return predict_team()
+        # if frame_num % 7 == 0:
+        #     return predict_team()
         
         # if the player is not detected in the frame
+        # else:
+        if player_id in self.player_team_dict:
+            return self.player_team_dict[player_id]
         else:
-            if player_id in self.player_team_dict:
-                return self.player_team_dict[player_id]
-            
             return predict_team()
-        
+            
