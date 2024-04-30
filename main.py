@@ -7,19 +7,19 @@ from player_assigner_ball import PlayerAssignerBall
 
 def main():
     # read the video
-    video_frames = read_video("input_videos/mancity-passing.mp4")
+    video_frames = read_video("input_videos/2e57b9_9.mp4")
 
     # initialize the tracker
     tracker = Tracker("models/tuned/best-tuned.pt")
 
     # get the tracks
-    tracks = tracker.get_object_track(video_frames, read_from_stub=True, stub_path='stubs/stub_passing_tracks.pkl')
+    tracks = tracker.get_object_track(video_frames, read_from_stub=True, stub_path='stubs/stub_tracks.pkl')
 
     # interpolate the ball position
     tracks['ball'] = tracker.interpolate_ball_position(tracks['ball'])
 
     # assign team colors 
-    team_assigner = TeamAssigner(method='foreground')
+    team_assigner = TeamAssigner(method='center_box')
     team_assigner.assign_team_color(video_frames[0], tracks['players'][0])
 
     for frame_num, player_tracks in enumerate(tracks['players']):
@@ -52,7 +52,7 @@ def main():
     output_video_frame  = tracker.draw_annotations(video_frames, tracks ,team_ball_control, team_assigner.team_colors)
 
     # save output video
-    save_video(output_video_frame, "output_videos/output-passing.avi")
+    save_video(output_video_frame, "output_videos/output.avi")
 
 
 if __name__ == "__main__":

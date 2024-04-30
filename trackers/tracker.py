@@ -19,7 +19,7 @@ class Tracker:
         df_ball_positions = pd.DataFrame(ball_positions, columns=['x1', 'y1', 'x2', 'y2'])
 
         # interpolate missing values for ball positions
-        df_ball_positions = df_ball_positions.interpolate()
+        df_ball_positions = df_ball_positions.interpolate(limit=4)
         df_ball_positions = df_ball_positions.bfill()
 
         ball_positions = [{1: {'bbox': x}} for x in df_ball_positions.to_numpy().tolist()]
@@ -142,7 +142,6 @@ class Tracker:
     
     def draw_team_ball_control(self, frame, tracks, frame_num, team_ball_control, team_colors):
         # draw rectangle for team ball control on the right bottom of the frame
-        cv2.rectangle(frame, (frame.shape[1] - 300, frame.shape[0] - 150), (frame.shape[1], frame.shape[0] - 50), (255, 255, 255), cv2.FILLED)
         
         ball_control_till_frame_num = team_ball_control[:frame_num+1]
         team_1_color = team_colors[1]
@@ -150,10 +149,10 @@ class Tracker:
         team_1_ball_control = (ball_control_till_frame_num[ball_control_till_frame_num == 1].shape[0] / len(ball_control_till_frame_num)) *100
         team_2_ball_control = (ball_control_till_frame_num[ball_control_till_frame_num == 2].shape[0] / len(ball_control_till_frame_num)) *100
 
-        cv2.rectangle(frame, (frame.shape[1] - 300, frame.shape[0] - 150), (frame.shape[1], frame.shape[0]- 50 ), team_1_color, cv2.FILLED)
-        cv2.rectangle(frame, (frame.shape[1] - 300, frame.shape[0] - 100), (frame.shape[1], frame.shape[0] - 50), team_2_color, cv2.FILLED)
-        cv2.putText(frame, f"Team 1: {team_1_ball_control:.1f} %", (frame.shape[1] - 250, frame.shape[0] - 110), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 0), 2)
-        cv2.putText(frame, f"Team 2: {team_2_ball_control:.1f} %", (frame.shape[1] - 250, frame.shape[0] - 70), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 0), 2)
+        cv2.rectangle(frame, (frame.shape[1] - 350, frame.shape[0] - 250), (frame.shape[1], frame.shape[0]- 50 ), team_1_color, cv2.FILLED)
+        cv2.rectangle(frame, (frame.shape[1] - 350, frame.shape[0] - 150), (frame.shape[1], frame.shape[0] - 50), team_2_color, cv2.FILLED)
+        cv2.putText(frame, f"Team 1: {team_1_ball_control:.1f} %", (frame.shape[1] - 300, frame.shape[0] - 200), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 0), 2)
+        cv2.putText(frame, f"Team 2: {team_2_ball_control:.1f} %", (frame.shape[1] - 300, frame.shape[0] - 100), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 0), 2)
 
         return frame
     def draw_annotations(self, frames, tracks, team_ball_control, team_colors):

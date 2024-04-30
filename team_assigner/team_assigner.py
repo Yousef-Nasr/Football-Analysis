@@ -52,10 +52,10 @@ class TeamAssigner:
                 labels = kmean.labels_
 
                 # get player cluster 
-                # player_color = kmean.cluster_centers_[np.argmax([sum(labels==i) for i in range(5)])]
-                player_color = kmean.cluster_centers_[np.argsort([sum(labels==i) for i in range(5)])]
+                player_color = kmean.cluster_centers_[np.argmax([sum(labels==i) for i in range(5)])]
+                # player_color = kmean.cluster_centers_[np.argsort([sum(labels==i) for i in range(5)])]
                 # take avrage of the two highest clusters
-                player_color = np.mean(player_color[:2], axis=0)
+                # player_color = np.mean(player_color[:2], axis=0)
                 return player_color
             else:
                 player_color = None
@@ -96,11 +96,11 @@ class TeamAssigner:
 
             return team_id
         
-        # predict the team every 7 frames
+        # # predict the team every 7 frames
         # if frame_num % 7 == 0:
         #     return predict_team()
         
-        # if the player is not detected in the frame
+        # # if the player is not detected in the frame
         # else:
         if player_id in self.player_team_dict:
             return self.player_team_dict[player_id]
