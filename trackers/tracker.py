@@ -8,6 +8,7 @@ import cv2
 import sys
 sys.path.append('../')
 from utils import get_center_of_bbox, get_bbox_width, get_bbox_height
+from tqdm import tqdm
 
 class Tracker:
     def __init__(self, model_path):
@@ -29,8 +30,8 @@ class Tracker:
     def detect_frames(self, frames):
         batch_size = 20 # number of frames to process at once 
         detections = []
-        for i in range(0, len(frames), batch_size):
-            batch_detections = self.model.predict(frames[i:i+batch_size], conf=0.1, device='cuda:0' )
+        for i in tqdm(range(0, len(frames), batch_size), desc="Detecting frames"):
+            batch_detections = self.model.predict(frames[i:i+batch_size], conf=0.1, device='cuda:0', verbose=False)
             detections += batch_detections
 
         return detections
@@ -87,7 +88,6 @@ class Tracker:
 
                 if cls_id == cls_names_inv["ball"]:
                     tracks["ball"][frame_num][1] = {"bbox":bbox}
-                    print("ball bbox", bbox)
 
         if stub_path is not None:
             with open(stub_path, 'wb') as f:
@@ -179,7 +179,6 @@ class Tracker:
             for track_id, referee in referee_dict.items():
                 frame = self.draw_ellipse(frame, referee["bbox"], (0, 255, 255))
             for track_id, ball in ball_dict.items():
-                print(ball["bbox"])
                 frame = self.draw_triangle(frame, ball["bbox"], (0, 255, 0))
 
             

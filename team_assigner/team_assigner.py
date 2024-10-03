@@ -49,7 +49,7 @@ class TeamAssigner:
                 player_color = None
                 return player_color
             
-        elif self.method == 'center_box':
+        elif self.method == 'center_box' or self.method == 'siglip':
             image = frame[int(bbox[1]):int(bbox[3]), int(bbox[0]):int(bbox[2])]
             image_center_box = image[image.shape[0]//4:(2*image.shape[0])//4, image.shape[1]//3:(3*image.shape[1])//5]
 
@@ -65,37 +65,42 @@ class TeamAssigner:
                 # take avrage of the two highest clusters
                 # player_color = np.mean(player_color[:2], axis=0)
                 return player_color
-            elif self.method == 'siglip':
-                return frame[int(bbox[1]):int(bbox[3]), int(bbox[0]):int(bbox[2])]
 
             else:
                 player_color = None
                 return player_color
 
+
     def assign_team_color(self, frame, players_detections):
-        
-        players_colors = []
-        for _, player_detection in players_detections.items():
-            bbox = player_detection['bbox']
-            player_color = self.get_player_color(frame, bbox)
-            players_colors.append(player_color)
-        
-        # cluster two teams colors
-        kmeans = KMeans(n_clusters=2, init='k-means++', n_init=1)
-        kmeans.fit(players_colors)
+        if self.method == 'siglip' or self.method == 'center_box':
+            self.team_colors[1] = [0, 0, 255] # red
+            self.team_colors[2] = [0, 255, 0] # green
+        else:
+            players_colors = []
+            for _, player_detection in players_detections.items():
+                bbox = player_detection['bbox']
+                player_color = self.get_player_color(frame, bbox)
+                players_colors.append(player_color)
+            
+            # cluster two teams colors
+            kmeans = KMeans(n_clusters=2, init='k-means++', n_init=1)
+            kmeans.fit(players_colors)
 
-        self.kmeans = kmeans
+            self.kmeans = kmeans
 
-        self.team_colors[1] = kmeans.cluster_centers_[0]
-        self.team_colors[2] = kmeans.cluster_centers_[1]
+            self.team_colors[1] = kmeans.cluster_centers_[0]
+            self.team_colors[2] = kmeans.cluster_centers_[1]
+
 
 
     def assign_players_to_teams(self, frame, frame_num, player_bbox, player_id):
         if self.method == 'siglip':
             def predict_team():
-                player = self.get_player_color(frame, player_bbox)
-                player = self.UMAP.transform()
-                team_id = self.kmeans.predict(player.reshape(1, -1))[0] 
+                player = frame[int(player_bbox[1]):int(player_bbox[3]), int(player_bbox[0]):int(player_bbox[2])]
+                player = self.embedding_player(player)
+                player = self.UMAP.transform(player)
+                team_id = self.kmeans_team.predict(player)[0]
+                print("Team: ", team_id)
 
                 # to make teams id 1 and 2 instead of 0 and 1
                 team_id += 1
@@ -126,13 +131,18 @@ class TeamAssigner:
         
         # # if the player is not detected in the frame
         # else:
-        if player_id in self.player_team_dict:
-            return self.player_team_dict[player_id]
-        else:
+        if player_id not in self.player_team_dict:
             return predict_team()
+        else:
+            return self.player_team_dict[player_id]
             
 
     def using_siglip(self, frames, detections):
+        SIGLIP_MODEL_PATH = 'google/siglip-base-patch16-224'
+
+        self.DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
+        self.EMBEDDINGS_MODEL = SiglipVisionModel.from_pretrained(SIGLIP_MODEL_PATH).to(self.DEVICE)
+        self.EMBEDDINGS_PROCESSOR = AutoProcessor.from_pretrained(SIGLIP_MODEL_PATH)
         PLAYER_ID = 2
         crops = []
         for frame, detection in tqdm(zip(frames, detections), desc='collecting crops'):
@@ -144,23 +154,15 @@ class TeamAssigner:
             
             # Collect all crops
             crops += players_crops
-
-        SIGLIP_MODEL_PATH = 'google/siglip-base-patch16-224'
-
-        DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
-        EMBEDDINGS_MODEL = SiglipVisionModel.from_pretrained(SIGLIP_MODEL_PATH).to(DEVICE)
-        EMBEDDINGS_PROCESSOR = AutoProcessor.from_pretrained(SIGLIP_MODEL_PATH)
         
-        BATCH_SIZE = 32
+        BATCH_SIZE = 64
 
         # crops = [sv.cv2_to_pillow(crop) for crop in crops]
         batches = chunked(crops, BATCH_SIZE)
         data = []
         with torch.no_grad():
             for batch in tqdm(batches, desc='embedding extraction'):
-                inputs = EMBEDDINGS_PROCESSOR(images=batch, return_tensors="pt").to(DEVICE)
-                outputs = EMBEDDINGS_MODEL(**inputs)
-                embeddings = torch.mean(outputs.last_hidden_state, dim=1).cpu().numpy()
+                embeddings = self.embedding_player(batch)
                 data.append(embeddings)
 
         data = np.concatenate(data)
@@ -170,18 +172,14 @@ class TeamAssigner:
         CLUSTERING_MODEL = KMeans(n_clusters=2)
         projections = REDUCER.fit_transform(data)
         cluster_model = CLUSTERING_MODEL.fit(projections)
-        self.kmeans = CLUSTERING_MODEL
+        self.kmeans_team = CLUSTERING_MODEL
         self.UMAP = REDUCER
 
-    def embbding_to_team(self, player):
-        
-        SIGLIP_MODEL_PATH = 'google/siglip-base-patch16-224'
-
-        DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
-        EMBEDDINGS_MODEL = SiglipVisionModel.from_pretrained(SIGLIP_MODEL_PATH).to(DEVICE)
-        EMBEDDINGS_PROCESSOR = AutoProcessor.from_pretrained(SIGLIP_MODEL_PATH)
+    def embedding_player(self, player):
 
         with torch.no_grad():
-            inputs = EMBEDDINGS_PROCESSOR(images=player, return_tensors="pt").to(DEVICE)
-            outputs = EMBEDDINGS_MODEL(**inputs)
+            inputs = self.EMBEDDINGS_PROCESSOR(images=player, return_tensors="pt").to(self.DEVICE)
+            outputs = self.EMBEDDINGS_MODEL(**inputs)
             embeddings = torch.mean(outputs.last_hidden_state, dim=1).cpu().numpy()
+        return embeddings
+    
