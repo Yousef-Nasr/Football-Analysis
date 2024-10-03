@@ -19,7 +19,8 @@ class Tracker:
         df_ball_positions = pd.DataFrame(ball_positions, columns=['x1', 'y1', 'x2', 'y2'])
 
         # interpolate missing values for ball positions
-        df_ball_positions = df_ball_positions.interpolate(limit=4)
+        # df_ball_positions = df_ball_positions.interpolate(limit=4)
+        df_ball_positions = df_ball_positions.interpolate()
         df_ball_positions = df_ball_positions.bfill()
 
         ball_positions = [{1: {'bbox': x}} for x in df_ball_positions.to_numpy().tolist()]
@@ -46,13 +47,15 @@ class Tracker:
             "referees": [],
             "ball": [],
         }
-
+        
+        all_sv_detections = []
         for frame_num, detection in enumerate(detections):
             cls_names = detection.names
             cls_names_inv = {v: k for k, v in cls_names.items()}
 
             # Convert ultralytics detection to supervision detection
             detection_sv = sv.Detections.from_ultralytics(detection)
+            all_sv_detections.append(detection_sv)
 
             # Convert goalkeeper to player object
             for idx_object, class_id in enumerate(detection_sv.class_id):
@@ -84,11 +87,12 @@ class Tracker:
 
                 if cls_id == cls_names_inv["ball"]:
                     tracks["ball"][frame_num][1] = {"bbox":bbox}
+                    print("ball bbox", bbox)
 
         if stub_path is not None:
             with open(stub_path, 'wb') as f:
                 pickle.dump(tracks, f)
-        return tracks
+        return tracks, all_sv_detections
     
 
     def draw_ellipse(self, frame, bbox, color, track_id = None):
@@ -175,7 +179,9 @@ class Tracker:
             for track_id, referee in referee_dict.items():
                 frame = self.draw_ellipse(frame, referee["bbox"], (0, 255, 255))
             for track_id, ball in ball_dict.items():
+                print(ball["bbox"])
                 frame = self.draw_triangle(frame, ball["bbox"], (0, 255, 0))
+
             
             frame = self.draw_team_ball_control(frame, tracks, frame_num, team_ball_control, team_colors)
 

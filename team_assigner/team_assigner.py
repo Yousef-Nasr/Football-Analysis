@@ -1,5 +1,13 @@
 from sklearn.cluster import KMeans
 import numpy as np
+import torch
+from transformers import AutoProcessor, SiglipVisionModel
+from tqdm import tqdm
+import supervision as sv
+import cv2 
+from more_itertools import chunked
+import umap
+
 class TeamAssigner:
     def __init__(self, method='foreground'):
         self.team_colors = {0: [0, 0, 255]}
@@ -57,6 +65,9 @@ class TeamAssigner:
                 # take avrage of the two highest clusters
                 # player_color = np.mean(player_color[:2], axis=0)
                 return player_color
+            elif self.method == 'siglip':
+                return frame[int(bbox[1]):int(bbox[3]), int(bbox[0]):int(bbox[2])]
+
             else:
                 player_color = None
                 return player_color
@@ -80,22 +91,35 @@ class TeamAssigner:
 
 
     def assign_players_to_teams(self, frame, frame_num, player_bbox, player_id):
+        if self.method == 'siglip':
+            def predict_team():
+                player = self.get_player_color(frame, player_bbox)
+                player = self.UMAP.transform()
+                team_id = self.kmeans.predict(player.reshape(1, -1))[0] 
 
-        # predict the team of the player
-        def predict_team():
-            player_color = self.get_player_color(frame, player_bbox)
+                # to make teams id 1 and 2 instead of 0 and 1
+                team_id += 1
 
-            if player_color is None:
-                return 0
-            team_id = self.kmeans.predict(player_color.reshape(1, -1))[0] 
+                self.player_team_dict[player_id] = team_id
 
-            # to make teams id 1 and 2 instead of 0 and 1
-            team_id += 1
+                return team_id
+        else:
+            # predict the team of the player
+            def predict_team():
+                player_color = self.get_player_color(frame, player_bbox)
 
-            self.player_team_dict[player_id] = team_id
+                if player_color is None:
+                    return 0
+                team_id = self.kmeans.predict(player_color.reshape(1, -1))[0] 
 
-            return team_id
+                # to make teams id 1 and 2 instead of 0 and 1
+                team_id += 1
+
+                self.player_team_dict[player_id] = team_id
+
+                return team_id
         
+
         # # predict the team every 7 frames
         # if frame_num % 7 == 0:
         #     return predict_team()
@@ -107,3 +131,57 @@ class TeamAssigner:
         else:
             return predict_team()
             
+
+    def using_siglip(self, frames, detections):
+        PLAYER_ID = 2
+        crops = []
+        for frame, detection in tqdm(zip(frames, detections), desc='collecting crops'):
+            # Filter detections by the class ID (e.g., PLAYER_ID)
+            player_detections = detection[detection.class_id == PLAYER_ID]
+            
+            # Crop images for each player detected in the frame
+            players_crops = [sv.crop_image(frame, xyxy) for xyxy in player_detections.xyxy]
+            
+            # Collect all crops
+            crops += players_crops
+
+        SIGLIP_MODEL_PATH = 'google/siglip-base-patch16-224'
+
+        DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
+        EMBEDDINGS_MODEL = SiglipVisionModel.from_pretrained(SIGLIP_MODEL_PATH).to(DEVICE)
+        EMBEDDINGS_PROCESSOR = AutoProcessor.from_pretrained(SIGLIP_MODEL_PATH)
+        
+        BATCH_SIZE = 32
+
+        # crops = [sv.cv2_to_pillow(crop) for crop in crops]
+        batches = chunked(crops, BATCH_SIZE)
+        data = []
+        with torch.no_grad():
+            for batch in tqdm(batches, desc='embedding extraction'):
+                inputs = EMBEDDINGS_PROCESSOR(images=batch, return_tensors="pt").to(DEVICE)
+                outputs = EMBEDDINGS_MODEL(**inputs)
+                embeddings = torch.mean(outputs.last_hidden_state, dim=1).cpu().numpy()
+                data.append(embeddings)
+
+        data = np.concatenate(data)
+
+
+        REDUCER = umap.UMAP(n_components=3)
+        CLUSTERING_MODEL = KMeans(n_clusters=2)
+        projections = REDUCER.fit_transform(data)
+        cluster_model = CLUSTERING_MODEL.fit(projections)
+        self.kmeans = CLUSTERING_MODEL
+        self.UMAP = REDUCER
+
+    def embbding_to_team(self, player):
+        
+        SIGLIP_MODEL_PATH = 'google/siglip-base-patch16-224'
+
+        DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
+        EMBEDDINGS_MODEL = SiglipVisionModel.from_pretrained(SIGLIP_MODEL_PATH).to(DEVICE)
+        EMBEDDINGS_PROCESSOR = AutoProcessor.from_pretrained(SIGLIP_MODEL_PATH)
+
+        with torch.no_grad():
+            inputs = EMBEDDINGS_PROCESSOR(images=player, return_tensors="pt").to(DEVICE)
+            outputs = EMBEDDINGS_MODEL(**inputs)
+            embeddings = torch.mean(outputs.last_hidden_state, dim=1).cpu().numpy()
