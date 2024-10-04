@@ -33,6 +33,9 @@ the foreground method is based on the top-half image of the player. The top-half
 The center-box method is based on the center box of the player. The center box is obtained by cropping the center box of the player. The center box clustering to two clusters using K-means clustering algorithm. To get the player shirt color which is usually in the center box of player bounding box.
 ![center-box](photos/center-box-method.jpg)
 
+- **Siglip method (NEW)**
+The siglip method is based on the visual embedding of the player. The visual embedding is obtained by passing the player image through a pre-trained model. The visual embedding clustering to two clusters using K-means clustering algorithm. To get the player team assignment.
+
 ## Dependencies
 
 Before running the project, ensure you have the following dependencies installed:
@@ -43,6 +46,9 @@ Before running the project, ensure you have the following dependencies installed
 - scikit_learn
 - supervision
 - ultralytics
+- torch
+- transformers
+- umap_learn
 
 ## Installation
 
@@ -72,7 +78,7 @@ python main.py --input_video path/to/input/video.mp4 --output_video path/to/outp
 
 - `--input_video`: Path to the input video.
 - `--output_video`: Path to save the output video (should be .avi).
-- `--clustering_method`: Clustering method for team assignment. Choose between `center_box` and `foreground`.
+- `--clustering_method`: Clustering method for team assignment. Choose between `center_box`, `foreground` and the new feature using visual embedding with `siglip`.
 - `--model_weight`: Path to the model weights.
 
 ## Acknowledgments
