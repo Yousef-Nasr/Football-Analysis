@@ -28,7 +28,7 @@ class Tracker:
         return ball_positions
     
     def detect_frames(self, frames):
-        batch_size = 20 # number of frames to process at once 
+        batch_size = 25 # number of frames to process at once 
         detections = []
         for i in tqdm(range(0, len(frames), batch_size), desc="Detecting frames"):
             batch_detections = self.model.predict(frames[i:i+batch_size], conf=0.1, device='cuda:0', verbose=False)
@@ -40,7 +40,7 @@ class Tracker:
 
         if read_from_stub and os.path.exists(stub_path) and stub_path is not None:
             with open(stub_path, 'rb') as f:
-                return pickle.load(f)
+                return pickle.load(f), pickle.load(f)
         detections = self.detect_frames(frames)
 
         tracks = {
@@ -56,7 +56,7 @@ class Tracker:
 
             # Convert ultralytics detection to supervision detection
             detection_sv = sv.Detections.from_ultralytics(detection)
-            all_sv_detections.append(detection_sv)
+            # all_sv_detections.append(detection_sv)
 
             # Convert goalkeeper to player object
             for idx_object, class_id in enumerate(detection_sv.class_id):
@@ -65,6 +65,7 @@ class Tracker:
 
             # Track objects
             detection_with_track = self.tracker.update_with_detections(detection_sv)
+            all_sv_detections.append(detection_with_track)
             
             tracks["players"].append({})
             tracks["referees"].append({})
@@ -92,6 +93,7 @@ class Tracker:
         if stub_path is not None:
             with open(stub_path, 'wb') as f:
                 pickle.dump(tracks, f)
+                pickle.dump(all_sv_detections, f)
         return tracks, all_sv_detections
     
 
@@ -128,12 +130,6 @@ class Tracker:
     def draw_triangle(self, frame, bbox, color):
         y = int(bbox[1])
         x, _ = get_center_of_bbox(bbox)
-        width, height = get_bbox_width(bbox), get_bbox_height(bbox)
-        # triangle_points = np.array([
-        #     [x,y],
-        #     [x+int(width), y-int(height*1.5)],
-        #     [x-int(width), y-int(height*1.5)]
-        # ])
         triangle_points = np.array([
             [x,y],
             [x+10, y-20],
@@ -159,6 +155,49 @@ class Tracker:
         cv2.putText(frame, f"Team 2: {team_2_ball_control:.1f} %", (frame.shape[1] - 300, frame.shape[0] - 100), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 0), 2)
 
         return frame
+    
+    def draw_fancy_team_ball_control(self, frame, tracks, frame_num, team_ball_control, team_colors):
+        # Calculate ball control percentages
+        ball_control_till_frame_num = team_ball_control[:frame_num+1]
+        team_1_ball_control = (ball_control_till_frame_num[ball_control_till_frame_num == 1].shape[0] / len(ball_control_till_frame_num)) * 100
+        team_2_ball_control = (ball_control_till_frame_num[ball_control_till_frame_num == 2].shape[0] / len(ball_control_till_frame_num)) * 100
+
+        # Define colors and dimensions
+        bg_color = (0, 0, 0)
+        text_color = (255, 255, 255)
+        team_1_color = team_colors[1]
+        team_2_color = team_colors[2]
+        overlay_height = 120
+        overlay_width = 300
+        bar_height = 20
+        padding = 10
+
+        # Create a semi-transparent overlay
+        overlay = np.zeros((overlay_height, overlay_width, 3), dtype=np.uint8)
+        cv2.rectangle(overlay, (0, 0), (overlay_width, overlay_height), bg_color, -1)
+
+        # Draw team names and percentages
+        cv2.putText(overlay, "Team 1", (padding, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, text_color, 2)
+        cv2.putText(overlay, f"{team_1_ball_control:.1f}%", (overlay_width - 60, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, text_color, 2)
+        
+        cv2.putText(overlay, "Team 2", (padding, 80), cv2.FONT_HERSHEY_SIMPLEX, 0.7, text_color, 2)
+        cv2.putText(overlay, f"{team_2_ball_control:.1f}%", (overlay_width - 60, 80), cv2.FONT_HERSHEY_SIMPLEX, 0.7, text_color, 2)
+
+        # Draw progress bars
+        cv2.rectangle(overlay, (padding, 40), (int(padding + (overlay_width - 2*padding) * team_1_ball_control / 100), 40 + bar_height), team_1_color, -1)
+        cv2.rectangle(overlay, (padding, 90), (int(padding + (overlay_width - 2*padding) * team_2_ball_control / 100), 90 + bar_height), team_2_color, -1)
+
+        # Add overlay to the frame
+        x_offset = frame.shape[1] - overlay_width - padding
+        y_offset = frame.shape[0] - overlay_height - padding
+        
+        alpha = 0.7  # Transparency factor
+        frame_roi = frame[y_offset:y_offset+overlay_height, x_offset:x_offset+overlay_width]
+        cv2.addWeighted(overlay, alpha, frame_roi, 1 - alpha, 0, frame_roi)
+        frame[y_offset:y_offset+overlay_height, x_offset:x_offset+overlay_width] = frame_roi
+
+        return frame
+    
     def draw_annotations(self, frames, tracks, team_ball_control, team_colors):
         output_video_frames = []
         for frame_num, frame in enumerate(frames):
@@ -182,7 +221,8 @@ class Tracker:
                 frame = self.draw_triangle(frame, ball["bbox"], (0, 255, 0))
 
             
-            frame = self.draw_team_ball_control(frame, tracks, frame_num, team_ball_control, team_colors)
+            #frame = self.draw_team_ball_control(frame, tracks, frame_num, team_ball_control, team_colors)
+            frame = self.draw_fancy_team_ball_control(frame, tracks, frame_num, team_ball_control, team_colors)
 
             output_video_frames.append(frame)
         return output_video_frames

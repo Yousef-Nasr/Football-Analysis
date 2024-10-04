@@ -8,11 +8,18 @@ import cv2
 from more_itertools import chunked
 import umap
 
+SIGLIP_MODEL_PATH = 'google/siglip-base-patch16-224'
+DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
+
+
 class TeamAssigner:
-    def __init__(self, method='foreground'):
+    def __init__(self, frames, detections, method='foreground'):
         self.team_colors = {0: [0, 0, 255]}
         self.player_team_dict = {}
         self.method = method
+        if self.method == 'siglip':
+            self.clusters, self.frame_player_map = Siglip().pipeline(frames, detections)
+
 
     def get_clustring_model(self, image, n_clusters=2):
         image_2d = image.reshape(-1, 3)
@@ -93,21 +100,16 @@ class TeamAssigner:
 
 
 
-    def assign_players_to_teams(self, frame, frame_num, player_bbox, player_id):
+    def assign_players_to_teams(self, frame, frame_num, player_bbox, player_id, player_idx):
         if self.method == 'siglip':
             def predict_team():
-                player = frame[int(player_bbox[1]):int(player_bbox[3]), int(player_bbox[0]):int(player_bbox[2])]
-                player = self.embedding_player(player)
-                player = self.UMAP.transform(player)
-                team_id = self.kmeans_team.predict(player)[0]
-                print("Team: ", team_id)
-
-                # to make teams id 1 and 2 instead of 0 and 1
-                team_id += 1
-
-                self.player_team_dict[player_id] = team_id
-
-                return team_id
+                embedding_index = self.frame_player_map.get((frame_num, player_idx))
+                if embedding_index is not None:
+                    team_id = self.clusters[embedding_index] + 1
+                    self.player_team_dict[player_id] = team_id
+                    return team_id
+                else:
+                    return 0
         else:
             # predict the team of the player
             def predict_team():
@@ -124,62 +126,81 @@ class TeamAssigner:
 
                 return team_id
         
-
-        # # predict the team every 7 frames
-        # if frame_num % 7 == 0:
-        #     return predict_team()
-        
-        # # if the player is not detected in the frame
-        # else:
-        if player_id not in self.player_team_dict:
+        if player_id not in self.player_team_dict or self.method == 'siglip':
             return predict_team()
+
         else:
             return self.player_team_dict[player_id]
-            
 
-    def using_siglip(self, frames, detections):
-        SIGLIP_MODEL_PATH = 'google/siglip-base-patch16-224'
 
-        self.DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
-        self.EMBEDDINGS_MODEL = SiglipVisionModel.from_pretrained(SIGLIP_MODEL_PATH).to(self.DEVICE)
-        self.EMBEDDINGS_PROCESSOR = AutoProcessor.from_pretrained(SIGLIP_MODEL_PATH)
+    
+class Siglip():
+    def __init__(self):
+        self.EMBEDDINGS_MODEL = SiglipVisionModel.from_pretrained(SIGLIP_MODEL_PATH, attn_implementation="sdpa").to(DEVICE).eval()
+        self.EMBEDDINGS_PROCESSOR = AutoProcessor.from_pretrained(SIGLIP_MODEL_PATH,)
+        self.REDUCER = umap.UMAP(n_components=3)
+        self.CLUSTERING_MODEL = KMeans(n_clusters=2)
+        self.clusters = {}
+        self.frame_player_map = {}
+
+    def crop_players(self, frames, detections):
         PLAYER_ID = 2
         crops = []
-        for frame, detection in tqdm(zip(frames, detections), desc='collecting crops'):
+        embedding_index = 0
+        self.frame_player_map = {}
+
+        for frame_idx, (frame, detection) in enumerate(zip(frames, detections)):
             # Filter detections by the class ID (e.g., PLAYER_ID)
             player_detections = detection[detection.class_id == PLAYER_ID]
             
             # Crop images for each player detected in the frame
             players_crops = [sv.crop_image(frame, xyxy) for xyxy in player_detections.xyxy]
+
+            # New: Map each player in each frame to an embedding index
+            for player_idx, _ in enumerate(players_crops):
+                self.frame_player_map[(frame_idx, player_idx)] = embedding_index
+                embedding_index += 1
             
             # Collect all crops
             crops += players_crops
-        
-        BATCH_SIZE = 64
 
-        # crops = [sv.cv2_to_pillow(crop) for crop in crops]
-        batches = chunked(crops, BATCH_SIZE)
+        return crops
+    
+    def embedding_players(self, crops, batch_size=64):
+
+        batches = chunked(crops, batch_size)
         data = []
-        with torch.no_grad():
-            for batch in tqdm(batches, desc='embedding extraction'):
-                embeddings = self.embedding_player(batch)
-                data.append(embeddings)
+        for batch in tqdm(batches, desc='embedding extraction'):
+            embeddings = self.embedding_(batch)
+            data.append(embeddings)
 
         data = np.concatenate(data)
-
-
-        REDUCER = umap.UMAP(n_components=3)
-        CLUSTERING_MODEL = KMeans(n_clusters=2)
-        projections = REDUCER.fit_transform(data)
-        cluster_model = CLUSTERING_MODEL.fit(projections)
-        self.kmeans_team = CLUSTERING_MODEL
-        self.UMAP = REDUCER
-
-    def embedding_player(self, player):
-
-        with torch.no_grad():
-            inputs = self.EMBEDDINGS_PROCESSOR(images=player, return_tensors="pt").to(self.DEVICE)
-            outputs = self.EMBEDDINGS_MODEL(**inputs)
-            embeddings = torch.mean(outputs.last_hidden_state, dim=1).cpu().numpy()
+        return data
+    
+    @torch.no_grad()
+    def embedding_(self, player):
+        inputs = self.EMBEDDINGS_PROCESSOR(images=player, return_tensors="pt").to(DEVICE)
+        outputs = self.EMBEDDINGS_MODEL(**inputs)
+        embeddings = torch.mean(outputs.last_hidden_state, dim=1).cpu().numpy()
         return embeddings
     
+    def fit(self, data):
+        projections = self.REDUCER.fit_transform(data)
+        self.CLUSTERING_MODEL.fit(projections)
+
+    def predict(self, data, is_umap=True):
+        if is_umap:
+            projections = self.REDUCER.transform(data)
+        else:
+            projections = data
+
+        cluster_model = self.CLUSTERING_MODEL.predict(projections)
+        for i in range(len(data)):
+            self.clusters[i] = cluster_model[i]
+        return cluster_model
+    
+    def pipeline(self, frames, detections):
+        crops = self.crop_players(frames, detections)
+        data = self.embedding_players(crops)
+        self.fit(data)
+        return self.predict(data), self.frame_player_map
