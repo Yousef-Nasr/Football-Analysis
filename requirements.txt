@@ -1,6 +1,12 @@
+more_itertools==10.5.0
 numpy==1.26.4
 opencv_python==4.7.0.72
-pandas==2.2.2
+opencv_python_headless==4.10.0.84
+pandas==2.2.0
 scikit_learn==1.4.2
-supervision==0.20.0
-ultralytics==8.1.17
+supervision==0.18.0
+torch==2.2.0+cu121
+tqdm==4.66.2
+transformers==4.44.2
+ultralytics==8.2.74
+umap_learn==0.5.6
